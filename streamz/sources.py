@@ -5,7 +5,7 @@ import time
 import tornado.ioloop
 from tornado import gen
 
-from .core import Stream, convert_interval
+from .core import Stream, convert_interval, RefCounter
 
 
 def PeriodicCallback(callback, callback_time, asynchronous=False, **kwargs):
@@ -468,6 +468,30 @@ class FromKafkaBatched(Stream):
     def poll_kafka(self):
         import confluent_kafka as ck
 
+        def commit(_part):
+            topic, part_no, _, _, offset = _part[1:]
+            _tp = ck.TopicPartition(topic, part_no, offset + 1)
+            self.consumer.commit(offsets=[_tp], asynchronous=True)
+
+        @gen.coroutine
+        def checkpoint_emit(_part):
+            ref = RefCounter(cb=lambda: commit(_part))
+            yield self._emit(_part, metadata={'refs': ref})
+
+        tps = []
+        for partition in range(self.npartitions):
+            tps.append(ck.TopicPartition(self.topic, partition))
+
+        while True:
+            try:
+                committed = self.consumer.committed(tps, timeout=1)
+            except ck.KafkaException:
+                pass
+            else:
+                for tp in committed:
+                    self.positions[tp.partition] = tp.offset
+                break
+
         try:
             while not self.stopped:
                 out = []
@@ -486,7 +510,7 @@ class FromKafkaBatched(Stream):
                         self.positions[partition] = high
 
                 for part in out:
-                    yield self._emit(part)
+                    self.loop.add_callback(checkpoint_emit, part)
 
                 else:
                     yield gen.sleep(self.poll_interval)
