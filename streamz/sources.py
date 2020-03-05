@@ -591,7 +591,7 @@ def from_kafka_batched(topic, consumer_params, poll_interval='1s',
     return source.starmap(get_message_batch)
 
 
-def get_message_batch(kafka_params, topic, partition, low, high, timeout=None):
+def get_message_batch(kafka_params, topic, partition, keys, low, high, timeout=None):
     """Fetch a batch of kafka messages (keys & values) in given topic/partition
 
     This will block until messages are available, or timeout is reached.
