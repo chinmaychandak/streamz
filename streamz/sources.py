@@ -643,7 +643,7 @@ class FromKafkaCudf(Stream):
                                           partitions=list(range(self.npartitions)))
 
         def commit(_part):
-            topic, part_no, _, offset = _part[1:]
+            topic, part_no, _, _, offset = _part[1:]
             print("committing offset:" + str(offset) + " in partition:" + str(part_no))
             self.consumer.commit(topic=topic, partition=part_no, offset=offset+1)
 
