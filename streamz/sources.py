@@ -632,14 +632,9 @@ class FromKafkaCudf(Stream):
         self.poll_interval = convert_interval(poll_interval)
         self.max_batch_size = max_batch_size
         self.stopped = True
-        self.kafka_configs = {
-            "metadata.broker.list": consumer_params['bootstrap.servers'],
-            "enable.partition.eof": "true",
-            "group.id": consumer_params['group.id'],
-            "auto.offset.reset": "earliest",
-            "enable.auto.commit": "false"
-            "session.timeout.ms": "60000"
-        }
+        self.kafka_configs = consumer_params
+        self.kafka_configs["enable.auto.commit"] = "false"
+        self.kafka_configs["auto.offset.reset"] = "earliest"
         self.consumer = kafka.KafkaHandle(self.kafka_configs, topics=[self.topic],
                                           partitions=list(range(self.npartitions)))
         super(FromKafkaCudf, self).__init__(ensure_io_loop=True, **kwargs)
