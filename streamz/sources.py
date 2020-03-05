@@ -632,17 +632,16 @@ class FromKafkaCudf(Stream):
         self.poll_interval = convert_interval(poll_interval)
         self.max_batch_size = max_batch_size
         self.stopped = True
-        self.logger = logging.getLogger(__name__)
         self.kafka_configs = {
             "metadata.broker.list": consumer_params['bootstrap.servers'],
             "enable.partition.eof": "true",
             "group.id": consumer_params['group.id'],
             "auto.offset.reset": "earliest",
             "enable.auto.commit": "false"
+            "session.timeout.ms": "60000"
         }
-        for config in consumer_params:
-            self.kafka_configs[config] = consumer_params[config]
-        self.consumer = kafka.KafkaHandle(self.kafka_configs, topics=[self.topic])
+        self.consumer = kafka.KafkaHandle(self.kafka_configs, topics=[self.topic],
+                                          partitions=list(range(self.npartitions)))
         super(FromKafkaCudf, self).__init__(ensure_io_loop=True, **kwargs)
 
     @gen.coroutine
@@ -667,7 +666,8 @@ class FromKafkaCudf(Stream):
                 self.logger.exception(e)
             else:
                 for tp in committed:
-                    self.positions[tp.partition] = tp.offset
+                    for partition in tp:
+                        self.positions[partition] = tp[partition]
                 break
 
         while not self.stopped:
@@ -696,8 +696,8 @@ class FromKafkaCudf(Stream):
 
 @Stream.register_api(staticmethod)
 def from_kafka_cudf(topic, consumer_params, poll_interval='1s',
-                       npartitions=1, start=False, dask=False,
-                       max_batch_size=10000, **kwargs):
+                   npartitions=1, start=False, dask=False,
+                   max_batch_size=10000, **kwargs):
     if dask:
         from distributed.client import default_client
         kwargs['loop'] = default_client().loop
@@ -716,6 +716,6 @@ def from_kafka_cudf(topic, consumer_params, poll_interval='1s',
 
 
 def get_message_batch_cudf(kafka_configs, topic, partition, low, high, timeout=None):
-    consumer = kafka.KafkaHandle(self.kafka_configs, topics=[topic], partitions=[partition])
-    gdf = consumer.read_gdf(lines=True, start=low, end=high)
+    consumer = kafka.KafkaHandle(kafka_configs, topics=[topic], partitions=[partition])
+    gdf = consumer.read_gdf(topic=topic, partition=partition, lines=True, start=low, end=high)
     return gdf
