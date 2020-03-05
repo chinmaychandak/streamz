@@ -453,10 +453,11 @@ class from_kafka(Source):
 class FromKafkaBatched(Stream):
     """Base class for both local and cluster-based batched kafka processing"""
     def __init__(self, topic, consumer_params, poll_interval='1s',
-                 npartitions=1, keys=False, **kwargs):
+                 npartitions=1, max_batch_size=10000, keys=False, **kwargs):
         self.consumer_params = consumer_params
         self.topic = topic
         self.npartitions = npartitions
+        self.max_batch_size = max_batch_size
         self.positions = [0] * npartitions
         self.poll_interval = convert_interval(poll_interval)
         self.keys = keys
@@ -505,6 +506,8 @@ class FromKafkaBatched(Stream):
                         continue
                     current_position = self.positions[partition]
                     lowest = max(current_position, low)
+                    if high > lowest + self.max_batch_size:
+                        high = lowest + self.max_batch_size
                     if high > lowest:
                         out.append((self.consumer_params, self.topic, partition,
                                     self.keys, lowest, high - 1))
@@ -618,3 +621,98 @@ def get_message_batch(kafka_params, topic, partition, keys, low, high, timeout=N
     finally:
         consumer.close()
     return out
+
+
+class FromKafkaCudf(Stream):
+    def __init__(self, topic, consumer_params, poll_interval='1s',
+                 npartitions=1, max_batch_size=10000, **kwargs):
+        self.topic = topic
+        self.npartitions = npartitions
+        self.positions = [0] * npartitions
+        self.poll_interval = convert_interval(poll_interval)
+        self.max_batch_size = max_batch_size
+        self.stopped = True
+        self.kafka_configs = consumer_params
+        self.kafka_configs["enable.auto.commit"] = "false"
+#         self.kafka_configs["auto.offset.reset"] = "earliest"
+        super(FromKafkaCudf, self).__init__(ensure_io_loop=True, **kwargs)
+
+    @gen.coroutine
+    def poll_kafka(self):
+        from custreamz import kafka
+        self.consumer = kafka.KafkaHandle(self.kafka_configs, topics=[self.topic],
+                                          partitions=list(range(self.npartitions)))
+
+        def commit(_part):
+            topic, part_no, _, _, offset = _part[1:]
+            print("committing offset:" + str(offset) + " in partition:" + str(part_no))
+            self.consumer.commit(topic=topic, partition=part_no, offset=offset+1)
+
+        @gen.coroutine
+        def checkpoint_emit(_part):
+            ref = RefCounter(cb=lambda: commit(_part))
+            yield self._emit(_part, metadata={'refs': ref})
+
+        while True:
+            committed = []
+            try:
+                for partition in range(self.npartitions):
+                    committed.append(self.consumer.committed(topic=self.topic, partitions=[partition]))
+            except Exception as e:
+                self.logger.exception(e)
+            else:
+                for tp in committed:
+                    for partition in tp:
+                        self.positions[partition] = tp[partition]
+                break
+
+        while not self.stopped:
+            out = []
+            for partition in range(self.npartitions):
+                low, high = self.consumer.get_watermark_offsets(topic=self.topic, partition=partition)
+                current_position = self.positions[partition]
+                lowest = max(current_position, low)
+                if high > lowest + self.max_batch_size:
+                    high = lowest + self.max_batch_size
+                if high > lowest:
+                    out.append((self.kafka_configs, self.topic, partition,
+                                lowest, high - 1))
+                    self.positions[partition] = high
+
+            for part in out:
+                self.loop.add_callback(checkpoint_emit, part)
+            else:
+                yield gen.sleep(self.poll_interval)
+
+    def start(self):
+        if self.stopped:
+            self.stopped = False
+            self.loop.add_callback(self.poll_kafka)
+
+
+@Stream.register_api(staticmethod)
+def from_kafka_cudf(topic, consumer_params, poll_interval='1s',
+                   npartitions=1, start=False, dask=False,
+                   max_batch_size=10000, **kwargs):
+    if dask:
+        from distributed.client import default_client
+        kwargs['loop'] = default_client().loop
+    source = FromKafkaCudf(topic, consumer_params,
+                          poll_interval=poll_interval,
+                          npartitions=npartitions,
+                          max_batch_size=max_batch_size,
+                          **kwargs)
+    if dask:
+        source = source.scatter()
+
+    if start:
+        source.start()
+
+    return source.starmap(get_message_batch_cudf)
+
+
+def get_message_batch_cudf(kafka_configs, topic, partition, low, high, timeout=None):
+    from custreamz import kafka
+    consumer = kafka.KafkaHandle(kafka_configs, topics=[topic], partitions=[partition])
+    gdf = consumer.read_gdf(topic=topic, partition=partition, lines=True, start=low, end=high)
+    return gdf
