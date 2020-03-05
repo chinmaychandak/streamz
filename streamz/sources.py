@@ -634,7 +634,7 @@ class FromKafkaCudf(Stream):
         self.stopped = True
         self.kafka_configs = consumer_params
         self.kafka_configs["enable.auto.commit"] = "false"
-        self.kafka_configs["auto.offset.reset"] = "earliest"
+#         self.kafka_configs["auto.offset.reset"] = "earliest"
         self.consumer = kafka.KafkaHandle(self.kafka_configs, topics=[self.topic],
                                           partitions=list(range(self.npartitions)))
         super(FromKafkaCudf, self).__init__(ensure_io_loop=True, **kwargs)
