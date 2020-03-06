@@ -643,14 +643,14 @@ class FromKafkaCudf(Stream):
                                           partitions=list(range(self.npartitions)))
 
         def commit(_part):
-            topic, part_no, _, _, offset = _part[1:]
+            topic, part_no, _, offset = _part[1:]
             print("committing offset:" + str(offset) + " in partition:" + str(part_no))
             self.consumer.commit(topic=topic, partition=part_no, offset=offset+1)
 
         @gen.coroutine
         def checkpoint_emit(_part):
             ref = RefCounter(cb=lambda: commit(_part))
-            yield self._emit(_part, metadata={'refs': ref})
+            yield self._emit(_part, metadata=[{'ref': ref}])
 
         while True:
             committed = []
@@ -713,5 +713,5 @@ def from_kafka_cudf(topic, consumer_params, poll_interval='1s',
 def get_message_batch_cudf(kafka_configs, topic, partition, low, high, timeout=None):
     from custreamz import kafka
     consumer = kafka.KafkaHandle(kafka_configs, topics=[topic], partitions=[partition])
-    gdf = consumer.read_gdf(topic=topic, partition=partition, lines=True, start=low, end=high)
+    gdf = consumer.read_gdf(topic=topic, partition=partition, lines=True, start=low, end=high+1)
     return gdf
