@@ -657,8 +657,8 @@ class FromKafkaCudf(Stream):
             try:
                 for partition in range(self.npartitions):
                     committed.append(self.consumer.committed(topic=self.topic, partitions=[partition]))
-            except Exception as e:
-                self.logger.exception(e)
+            except:
+                pass
             else:
                 for tp in committed:
                     for partition in tp:
@@ -668,7 +668,10 @@ class FromKafkaCudf(Stream):
         while not self.stopped:
             out = []
             for partition in range(self.npartitions):
-                low, high = self.consumer.get_watermark_offsets(topic=self.topic, partition=partition)
+                try:
+                    low, high = self.consumer.get_watermark_offsets(topic=self.topic, partition=partition)
+                except:
+                    continue
                 current_position = self.positions[partition]
                 lowest = max(current_position, low)
                 if high > lowest + self.max_batch_size:
