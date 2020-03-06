@@ -639,8 +639,6 @@ class FromKafkaCudf(Stream):
     @gen.coroutine
     def poll_kafka(self):
         from custreamz import kafka
-        self.consumer = kafka.KafkaHandle(self.kafka_configs, topics=[self.topic],
-                                          partitions=list(range(self.npartitions)))
 
         def commit(_part):
             topic, part_no, _, offset = _part[1:]
@@ -687,8 +685,12 @@ class FromKafkaCudf(Stream):
                 yield gen.sleep(self.poll_interval)
 
     def start(self):
+        from custreamz import kafka
         if self.stopped:
+            self.consumer = kafka.KafkaHandle(self.kafka_configs, topics=[self.topic],
+                                              partitions=list(range(self.npartitions)))
             self.stopped = False
+            self.consumer.get_watermark_offsets(topic=self.topic, partition=0)
             self.loop.add_callback(self.poll_kafka)
 
 
