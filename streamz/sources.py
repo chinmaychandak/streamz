@@ -722,9 +722,5 @@ def from_kafka_cudf(topic, consumer_params, poll_interval='1s',
 def get_message_batch_cudf(kafka_configs, topic, partition, low, high, timeout=None):
     from custreamz import kafka
     consumer = kafka.KafkaHandle(kafka_configs, topics=[topic], partitions=[partition])
-    gdf = None
-    try:
-        gdf = consumer.read_gdf(topic=topic, partition=partition, lines=True, start=low, end=high+1)
-    finally:
-        consumer.close()
+    gdf = consumer.read_gdf(topic=topic, partition=partition, lines=True, start=low, end=high+1)
     return gdf
