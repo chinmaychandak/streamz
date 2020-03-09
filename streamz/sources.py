@@ -633,7 +633,7 @@ class FromKafkaCudf(Stream):
         self.stopped = True
         self.kafka_configs = consumer_params
         self.kafka_configs["enable.auto.commit"] = "false"
-#         self.kafka_configs["auto.offset.reset"] = "earliest"
+        self.kafka_configs["auto.offset.reset"] = "earliest"
         super(FromKafkaCudf, self).__init__(ensure_io_loop=True, **kwargs)
 
     @gen.coroutine
@@ -651,16 +651,15 @@ class FromKafkaCudf(Stream):
             yield self._emit(_part, metadata=[{'ref': ref}])
 
         while True:
-            committed = []
+            committed = {}
             try:
-                for partition in range(self.npartitions):
-                    committed.append(self.consumer.committed(topic=self.topic, partitions=[partition]))
+                committed = self.consumer.committed(topic=self.topic,
+                                                    partitions=list(range(self.npartitions)))
             except:
                 pass
             else:
-                for tp in committed:
-                    for partition in tp:
-                        self.positions[partition] = tp[partition]
+                for partition in committed:
+                    self.positions[partition] = committed[partition]
                 break
 
         while not self.stopped:
