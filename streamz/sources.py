@@ -662,26 +662,31 @@ class FromKafkaCudf(Stream):
                     self.positions[partition] = committed[partition]
                 break
 
-        while not self.stopped:
-            out = []
-            for partition in range(self.npartitions):
-                try:
-                    low, high = self.consumer.get_watermark_offsets(topic=self.topic, partition=partition)
-                except:
-                    continue
-                current_position = self.positions[partition]
-                lowest = max(current_position, low)
-                if high > lowest + self.max_batch_size:
-                    high = lowest + self.max_batch_size
-                if high > lowest:
-                    out.append((self.kafka_configs, self.topic, partition,
-                                lowest, high - 1))
-                    self.positions[partition] = high
+        try:
+            while not self.stopped:
+                out = []
+                for partition in range(self.npartitions):
+                    try:
+                        low, high = self.consumer.get_watermark_offsets(topic=self.topic, partition=partition)
+                    except:
+                        continue
+                    current_position = self.positions[partition]
+                    lowest = max(current_position, low)
+                    if high > lowest + self.max_batch_size:
+                        high = lowest + self.max_batch_size
+                    if high > lowest:
+                        out.append((self.kafka_configs, self.topic, partition,
+                                    lowest, high - 1))
+                        self.positions[partition] = high
 
-            for part in out:
-                self.loop.add_callback(checkpoint_emit, part)
-            else:
-                yield gen.sleep(self.poll_interval)
+                for part in out:
+                    self.loop.add_callback(checkpoint_emit, part)
+                else:
+                    yield gen.sleep(self.poll_interval)
+        finally:
+            self.consumer.unsubscribe()
+            self.consumer.close()
+
 
     def start(self):
         from custreamz import kafka
@@ -717,5 +722,9 @@ def from_kafka_cudf(topic, consumer_params, poll_interval='1s',
 def get_message_batch_cudf(kafka_configs, topic, partition, low, high, timeout=None):
     from custreamz import kafka
     consumer = kafka.KafkaHandle(kafka_configs, topics=[topic], partitions=[partition])
-    gdf = consumer.read_gdf(topic=topic, partition=partition, lines=True, start=low, end=high+1)
+    gdf = None
+    try:
+        gdf = consumer.read_gdf(topic=topic, partition=partition, lines=True, start=low, end=high+1)
+    finally:
+        consumer.close()
     return gdf
