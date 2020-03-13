@@ -250,4 +250,4 @@ class to_kafka(DaskStream):
 
         client = default_client()
         result = client.submit(produce, self.topic, x, self.producer_config)
-        self._emit(result)
+        self.emit(result)
